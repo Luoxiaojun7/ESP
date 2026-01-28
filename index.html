@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32双通道电阻实时监测系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            opacity: 0.8;
+            font-size: 1rem;
+        }
+        
+        .connection-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 25px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            min-width: 160px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+        
+        #connectButton {
+            background: linear-gradient(135deg, #00b09b, #96c93d);
+            color: white;
+        }
+        
+        #connectButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,176,155,0.4);
+        }
+        
+        #disconnectButton {
+            background: linear-gradient(135deg, #ff416c, #ff4b2b);
+            color: white;
+        }
+        
+        #disconnectButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255,65,108,0.4);
+        }
+        
+        #debugButton {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        
+        button:disabled {
+            background: #6c757d !important;
+            cursor: not-allowed;
+            opacity: 0.6;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.connected {
+            background: #28a745;
+            animation: none;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .data-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 25px;
+        }
+        
+        .data-panel {
+            background: white;
+            border: 1px solid #e0e0e0;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .data-panel:hover {
+            transform: translateY(-5px);
+        }
+        
+        .data-panel h3 {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #555;
+            font-weight: 600;
+        }
+        
+        .resistance-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        #resistanceLeft {
+            color: #e74c3c;
+        }
+        
+        #resistanceRight {
+            color: #3498db;
+        }
+        
+        #resistanceDiff {
+            color: #2ecc71;
+        }
+        
+        .unit {
+            font-size: 1rem;
+            color: #777;
+            margin-left: 5px;
+        }
+        
+        .chart-container {
+            padding: 25px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .chart-wrapper {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .info-panels {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 25px;
+        }
+        
+        .info-panel {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .info-panel h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+        
+        .info-panel p {
+            color: #555;
+            line-height: 1.6;
+        }
+        
+        #mobileTips, #iosTips, #androidEdgeTip, #errorMessage {
+            margin: 15px 25px;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        
+        #mobileTips {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        #iosTips {
+            background: #cce7ff;
+            border: 1px solid #99ceff;
+            color: #004085;
+        }
+        
+        #androidEdgeTip {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        #errorMessage {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .download-link {
+            color: #0066cc;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .download-link:hover {
+            text-decoration: underline;
+        }
+        
+        #debugInfo {
+            margin: 15px 25px;
+            padding: 15px;
+            background: #2c3e50;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: #ecf0f1;
+            text-align: left;
+            display: none;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.4rem;
+            }
+            
+            .data-container {
+                grid-template-columns: 1fr;
+                padding: 15px;
+            }
+            
+            .resistance-value {
+                font-size: 1.6rem;
+            }
+            
+            button {
+                min-width: 140px;
+                padding: 10px 20px;
+            }
+            
+            .info-panels {
+                grid-template-columns: 1fr;
+                padding: 15px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+            
+            .button-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            button {
+                width: 100%;
+                max-width: 280px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ESP32双通道电阻实时监测系统</h1>
+            <p>高精度双通道应变电阻测量与可视化分析</p>
+        </div>
+        
+        <div class="connection-panel">
+            <div class="button-container">
+                <button id="connectButton" onclick="connectToDevice()">连接ESP32设备</button>
+                <button id="disconnectButton" onclick="disconnectDevice()" disabled>断开连接</button>
+                <button id="debugButton" onclick="toggleDebug()">调试信息</button>
+            </div>
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+        
+        <div id="mobileTips">
+            <strong>移动端使用提示：</strong>请确保蓝牙已开启，并授予浏览器蓝牙权限。Android设备需要开启位置服务才能使用蓝牙功能。
+        </div>
+
+        <div id="androidEdgeTip">
+            <strong>浏览器兼容性提示：</strong>推荐使用Microsoft Edge浏览器访问本系统以获得最佳兼容性。
+        </div>
+        
+        <div id="iosTips">
+            <strong>iOS用户提示：</strong>苹果设备需要安装支持Web Bluetooth的浏览器(如Bluefy)。
+            <a href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055" target="_blank" class="download-link">下载Bluefy浏览器</a>
+        </div>
+        
+        <div id="errorMessage"></div>
+        
+        <div id="debugInfo"></div>
+
+        <div class="data-container">
+            <div class="data-panel">
+                <h3>右耳杯电阻 (AIN0)</h3>
+                <div class="resistance-value">
+                    <span id="resistanceRight">--</span><span class="unit">Ω</span>
+                </div>
+                <p>主耳杯 - 实时测量值</p>
+            </div>
+            
+            <div class="data-panel">
+                <h3>左耳杯电阻 (AIN1)</h3>
+                <div class="resistance-value">
+                    <span id="resistanceLeft">--</span><span class="unit">Ω</span>
+                </div>
+                <p>从耳杯 - 实时测量值</p>
+            </div>
+            
+            <div class="data-panel">
+                <h3>通道间差值</h3>
+                <div class="resistance-value">
+                    <span id="resistanceDiff">--</span><span class="unit">Ω</span>
+                </div>
+                <p>|右耳杯 - 左耳杯|</p>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-wrapper">
+                <canvas id="resistanceChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="info-panels">
+            <div class="info-panel">
+                <h3>系统信息</h3>
+                <p><strong>设备名称：</strong>ESP32_Dual_StrainGauge</p>
+                <p><strong>测量原理：</strong>恒流源法 (0.90μA)</p>
+                <p><strong>ADC精度：</strong>24位 (ADS1256)</p>
+                <p><strong>采样率：</strong>0.5 Hz</p>
+            </div>
+            
+            <div class="info-panel">
+                <h3>连接状态</h3>
+                <p><strong>BLE服务：</strong><span id="serviceStatus">等待连接</span></p>
+                <p><strong>数据格式：</strong>"右耳杯电阻,左耳杯电阻"</p>
+                <p><strong>最后更新：</strong><span id="lastUpdate">--</span></p>
+                <p><strong>数据点数：</strong><span id="dataPoints">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let bluetoothDevice = null;
+        let characteristic = null;
+        const connectButton = document.getElementById('connectButton');
+        const disconnectButton = document.getElementById('disconnectButton');
+        const debugButton = document.getElementById('debugButton');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const serviceStatus = document.getElementById('serviceStatus');
+        const lastUpdate = document.getElementById('lastUpdate');
+        const dataPoints = document.getElementById('dataPoints');
+        const resistanceLeftSpan = document.getElementById('resistanceLeft');
+        const resistanceRightSpan = document.getElementById('resistanceRight');
+        const resistanceDiffSpan = document.getElementById('resistanceDiff');
+        const mobileTips = document.getElementById('mobileTips');
+        const iosTips = document.getElementById('iosTips');
+        const androidEdgeTip = document.getElementById('androidEdgeTip');
+        const errorMessage = document.getElementById('errorMessage');
+        const debugInfo = document.getElementById('debugInfo');
+        
+        // 图表相关变量
+        let resistanceChart;
+        let chartData = {
+            labels: [],
+            datasets: [
+                {
+                    label: '右耳杯电阻 (Ω) - AIN0',
+                    data: [],
+                    borderColor: 'rgb(52, 152, 219)',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                },
+                {
+                    label: '左耳杯电阻 (Ω) - AIN1',
+                    data: [],
+                    borderColor: 'rgb(231, 76, 60)',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                }
+            ]
+        };
+        
+        // 数据统计
+        let dataPointCount = 0;
+        let startTime = null;
+        let updateInterval = null;
+        
+        // 调试日志
+        function logDebug(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            debugInfo.innerHTML += `[${timestamp}] ${message}<br>`;
+            debugInfo.scrollTop = debugInfo.scrollHeight;
+            console.log(message);
+        }
+        
+        // 更新连接状态
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = '已连接';
+                serviceStatus.textContent = '正常运行';
+                connectButton.disabled = true;
+                disconnectButton.disabled = false;
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = '未连接';
+                serviceStatus.textContent = '等待连接';
+                connectButton.disabled = false;
+                disconnectButton.disabled = true;
+            }
+        }
+        
+        // 显示错误信息
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            logDebug(`错误: ${message}`);
+        }
+        
+        // 隐藏错误信息
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+        
+        // 初始化图表
+        function initChart() {
+            const ctx = document.getElementById('resistanceChart').getContext('2d');
+            resistanceChart = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间 (秒)',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(0,0,0,0.1)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '电阻值 (Ω)',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(0,0,0,0.1)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleFont: {
+                                size: 14
+                            },
+                            bodyFont: {
+                                size: 13
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 连接设备
+        async function connectToDevice() {
+            // 检查浏览器兼容性
+            if (!navigator.bluetooth) {
+                showError('您的浏览器不支持Web Bluetooth功能');
+                return;
+            }
+            
+            try {
+                updateConnectionStatus(false);
+                hideError();
+                logDebug('开始连接流程...');
+                
+                resetData();
+                
+                logDebug('正在扫描设备...');
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ 
+                        name: 'ESP32_Dual_StrainGauge'
+                    }],
+                    optionalServices: ['00001234-0000-1000-8000-00805f9b34fb']
+                });
+                logDebug(`找到设备: ${bluetoothDevice.name || '未知设备'}`);
+
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+                
+                logDebug('正在连接GATT服务器...');
+                let server;
+                try {
+                    server = await Promise.race([
+                        bluetoothDevice.gatt.connect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('连接超时(10秒)')), 10000))
+                    ]);
+                    logDebug('GATT服务器连接成功');
+                } catch (connectError) {
+                    logDebug(`GATT服务器连接失败: ${connectError.message}`);
+                    throw connectError;
+                }
+                
+                logDebug('正在发现服务...');
+                const service = await server.getPrimaryService('00001234-0000-1000-8000-00805f9b34fb');
+                logDebug('服务发现成功');
+                
+                logDebug('正在获取特征...');
+                characteristic = await service.getCharacteristic('00004321-0000-1000-8000-00805f9b34fb');
+                logDebug('特征获取成功');
+                
+                logDebug('正在启动通知...');
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', updateResistanceValue);
+                logDebug('通知已启动，连接完成');
+                
+                updateConnectionStatus(true);
+                startTime = Date.now();
+                
+                // 开始更新时间显示
+                updateInterval = setInterval(updateTimeDisplay, 1000);
+                
+            } catch (error) {
+                logDebug(`连接过程中出错: ${error.message}`);
+                console.error('完整错误:', error);
+                onDisconnected();
+                
+                let errorMsg = '连接失败: ' + error.message;
+                
+                if (error.message.includes('not found')) {
+                    errorMsg = '未找到ESP32_Dual_StrainGauge设备，请确保设备在广播范围内';
+                } else if (error.message.includes('permission')) {
+                    errorMsg = '请授予浏览器蓝牙访问权限';
+                } else if (error.message.includes('User cancelled')) {
+                    errorMsg = '用户取消了设备选择';
+                } else if (error.message.includes('超时')) {
+                    errorMsg = '连接超时，请确保设备在范围内并重试';
+                }
+                
+                showError(errorMsg);
+            }
+        }
+
+        // 断开设备
+        function disconnectDevice() {
+            if (!bluetoothDevice) return;
+            
+            try {
+                logDebug('正在断开连接...');
+                if (bluetoothDevice.gatt.connected) {
+                    bluetoothDevice.gatt.disconnect();
+                }
+            } catch (error) {
+                logDebug(`断开失败: ${error.message}`);
+                showError('断开失败: ' + error.message);
+            } finally {
+                onDisconnected();
+            }
+        }
+
+        // 断开后的清理
+        function onDisconnected() {
+            logDebug('正在清理断开连接...');
+            if (characteristic) {
+                characteristic.removeEventListener('characteristicvaluechanged', updateResistanceValue);
+                characteristic = null;
+            }
+            
+            if (bluetoothDevice) {
+                bluetoothDevice.removeEventListener('gattserverdisconnected', onDisconnected);
+                bluetoothDevice = null;
+            }
+
+            if (updateInterval) {
+                clearInterval(updateInterval);
+                updateInterval = null;
+            }
+            
+            updateConnectionStatus(false);
+            resistanceLeftSpan.textContent = '--';
+            resistanceRightSpan.textContent = '--';
+            resistanceDiffSpan.textContent = '--';
+            lastUpdate.textContent = '--';
+            logDebug('断开连接清理完成');
+        }
+
+        // 重置数据
+        function resetData() {
+            chartData.labels = [];
+            chartData.datasets[0].data = [];
+            chartData.datasets[1].data = [];
+            if (resistanceChart) {
+                resistanceChart.update();
+            }
+            dataPointCount = 0;
+            dataPoints.textContent = '0';
+            startTime = null;
+            logDebug('数据已重置');
+        }
+        
+        // 更新时间显示
+        function updateTimeDisplay() {
+            if (startTime) {
+                const now = new Date();
+                lastUpdate.textContent = now.toLocaleTimeString();
+            }
+        }
+        
+        // 数据更新函数 - 已交换AIN0和AIN1的显示
+        function updateResistanceValue(event) {
+            try {
+                const valueStr = new TextDecoder().decode(event.target.value);
+                const values = valueStr.split(',');
+                
+                if (values.length !== 2) {
+                    logDebug(`数据格式错误，期望2个值，收到: ${valueStr}`);
+                    return;
+                }
+                
+                // 交换显示：AIN0显示为右耳杯，AIN1显示为左耳杯
+                const valueRight = parseFloat(values[0]);  // AIN0 - 右耳杯
+                const valueLeft = parseFloat(values[1]);   // AIN1 - 左耳杯
+                
+                if (isNaN(valueLeft) || isNaN(valueRight)) {
+                    logDebug(`收到无效数据: ${valueStr}`);
+                    return;
+                }
+                
+                // 更新显示值
+                resistanceRightSpan.textContent = valueRight.toFixed(2);
+                resistanceLeftSpan.textContent = valueLeft.toFixed(2);
+                
+                // 计算并显示差值
+                const diff = Math.abs(valueRight - valueLeft);
+                resistanceDiffSpan.textContent = diff.toFixed(2);
+                
+                // 更新时间
+                const currentTime = startTime ? (Date.now() - startTime) / 1000 : 0;
+                
+                // 添加到图表数据
+                chartData.labels.push(currentTime.toFixed(1));
+                chartData.datasets[0].data.push(valueRight);  // 右耳杯数据 (AIN0)
+                chartData.datasets[1].data.push(valueLeft);   // 左耳杯数据 (AIN1)
+                
+                // 限制数据点数量
+                const maxDataPoints = 100;
+                if (chartData.labels.length > maxDataPoints) {
+                    chartData.labels.shift();
+                    chartData.datasets[0].data.shift();
+                    chartData.datasets[1].data.shift();
+                }
+                
+                // 更新数据点计数
+                dataPointCount++;
+                dataPoints.textContent = dataPointCount;
+                
+                // 更新图表
+                resistanceChart.update('quiet');
+                
+                logDebug(`数据更新 - 右耳杯(AIN0): ${valueRight.toFixed(2)}Ω, 左耳杯(AIN1): ${valueLeft.toFixed(2)}Ω`);
+            } catch (error) {
+                logDebug(`数据处理错误: ${error.message}`);
+            }
+        }
+
+        // 切换调试信息
+        function toggleDebug() {
+            const isVisible = debugInfo.style.display === 'block';
+            debugInfo.style.display = isVisible ? 'none' : 'block';
+            debugButton.textContent = isVisible ? '调试信息' : '隐藏调试';
+        }
+
+        // 初始化应用
+        function initializeApp() {
+            initChart();
+            updateTimeDisplay();
+            
+            // 检查设备兼容性
+            const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+            
+            if (isMobile) {
+                mobileTips.style.display = 'block';
+            }
+            
+            if (isIOS) {
+                if (!navigator.bluetooth) {
+                    iosTips.style.display = 'block';
+                }
+            }
+            
+            if (!navigator.bluetooth) {
+                showError('您的浏览器不支持Web Bluetooth功能');
+                connectButton.disabled = true;
+            }
+        }
+
+        // 事件绑定
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+</body>
+</html>
