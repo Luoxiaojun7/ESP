@@ -359,7 +359,7 @@
 
         <div class="data-container">
             <div class="data-panel">
-                <h3>右耳杯电阻 (AIN0)</h3>
+                <h3>主耳杯电阻 (AIN0)</h3>
                 <div class="resistance-value">
                     <span id="resistanceRight">--</span><span class="unit">Ω</span>
                 </div>
@@ -367,7 +367,7 @@
             </div>
             
             <div class="data-panel">
-                <h3>左耳杯电阻 (AIN1)</h3>
+                <h3>从耳杯电阻 (AIN1)</h3>
                 <div class="resistance-value">
                     <span id="resistanceLeft">--</span><span class="unit">Ω</span>
                 </div>
@@ -379,7 +379,7 @@
                 <div class="resistance-value">
                     <span id="resistanceDiff">--</span><span class="unit">Ω</span>
                 </div>
-                <p>|右耳杯 - 左耳杯|</p>
+                <p>|主耳杯 - 从耳杯|</p>
             </div>
         </div>
 
@@ -401,7 +401,7 @@
             <div class="info-panel">
                 <h3>连接状态</h3>
                 <p><strong>BLE服务：</strong><span id="serviceStatus">等待连接</span></p>
-                <p><strong>数据格式：</strong>"右耳杯电阻,左耳杯电阻"</p>
+                <p><strong>数据格式：</strong>"主耳杯电阻,从耳杯电阻"</p>
                 <p><strong>最后更新：</strong><span id="lastUpdate">--</span></p>
                 <p><strong>数据点数：</strong><span id="dataPoints">0</span></p>
             </div>
@@ -435,7 +435,7 @@
             labels: [],
             datasets: [
                 {
-                    label: '右耳杯电阻 (Ω) - AIN0',
+                    label: '主耳杯电阻 (Ω) - AIN0',
                     data: [],
                     borderColor: 'rgb(52, 152, 219)',
                     backgroundColor: 'rgba(52, 152, 219, 0.1)',
@@ -444,7 +444,7 @@
                     fill: true
                 },
                 {
-                    label: '左耳杯电阻 (Ω) - AIN1',
+                    label: '从耳杯电阻 (Ω) - AIN1',
                     data: [],
                     borderColor: 'rgb(231, 76, 60)',
                     backgroundColor: 'rgba(231, 76, 60, 0.1)',
