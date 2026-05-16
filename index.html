@@ -96,6 +96,21 @@
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
         }
+
+        #saveButton {
+            background: linear-gradient(135deg, #11998e, #38ef7d);
+            color: white;
+        }
+
+        #exportButton {
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            color: #2c3e50;
+        }
+
+        #clearDataButton {
+            background: linear-gradient(135deg, #757f9a, #d7dde8);
+            color: #2c3e50;
+        }
         
         button:disabled {
             background: #6c757d !important;
@@ -332,6 +347,9 @@
             <div class="button-container">
                 <button id="connectButton" onclick="connectToDevice()">连接ESP32设备</button>
                 <button id="disconnectButton" onclick="disconnectDevice()" disabled>断开连接</button>
+                <button id="saveButton" onclick="saveDataToBrowser()" title="暂存到当前浏览器，刷新页面后仍可保留" disabled>暂存到浏览器</button>
+                <button id="exportButton" onclick="exportDataCsv()" title="下载为CSV文件，可用Excel或表格软件打开" disabled>下载CSV文件</button>
+                <button id="clearDataButton" onclick="clearLoggedData()" disabled>清空数据</button>
                 <button id="debugButton" onclick="toggleDebug()">调试信息</button>
             </div>
             <div class="status-indicator">
@@ -393,9 +411,9 @@
             <div class="info-panel">
                 <h3>系统信息</h3>
                 <p><strong>设备名称：</strong>ESP32_Dual_StrainGauge</p>
-                <p><strong>测量原理：</strong>恒流源法 (0.90μA)</p>
+                <p><strong>测量原理：</strong>恒流源法 (4.96μA)</p>
                 <p><strong>ADC精度：</strong>24位 (ADS1256)</p>
-                <p><strong>采样率：</strong>0.5 Hz</p>
+                <p><strong>输出频率：</strong>约 5 Hz</p>
             </div>
             
             <div class="info-panel">
@@ -403,7 +421,9 @@
                 <p><strong>BLE服务：</strong><span id="serviceStatus">等待连接</span></p>
                 <p><strong>数据格式：</strong>"主耳杯电阻,从耳杯电阻"</p>
                 <p><strong>最后更新：</strong><span id="lastUpdate">--</span></p>
+                <p><strong>接收频率：</strong><span id="receiveRate">--</span></p>
                 <p><strong>数据点数：</strong><span id="dataPoints">0</span></p>
+                <p><strong>已保存点数：</strong><span id="savedPoints">0</span></p>
             </div>
         </div>
     </div>
@@ -415,11 +435,16 @@
         const connectButton = document.getElementById('connectButton');
         const disconnectButton = document.getElementById('disconnectButton');
         const debugButton = document.getElementById('debugButton');
+        const saveButton = document.getElementById('saveButton');
+        const exportButton = document.getElementById('exportButton');
+        const clearDataButton = document.getElementById('clearDataButton');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const serviceStatus = document.getElementById('serviceStatus');
         const lastUpdate = document.getElementById('lastUpdate');
+        const receiveRate = document.getElementById('receiveRate');
         const dataPoints = document.getElementById('dataPoints');
+        const savedPoints = document.getElementById('savedPoints');
         const resistanceLeftSpan = document.getElementById('resistanceLeft');
         const resistanceRightSpan = document.getElementById('resistanceRight');
         const resistanceDiffSpan = document.getElementById('resistanceDiff');
@@ -459,6 +484,11 @@
         let dataPointCount = 0;
         let startTime = null;
         let updateInterval = null;
+        let dataLog = [];
+        let lastDataAt = null;
+        let pendingChartUpdate = false;
+        const EXPECTED_SAMPLE_INTERVAL_SECONDS = 0.2;
+        const STORAGE_KEY = 'esp32ResistanceDataLog';
         
         // 调试日志
         function logDebug(message) {
@@ -466,6 +496,96 @@
             debugInfo.innerHTML += `[${timestamp}] ${message}<br>`;
             debugInfo.scrollTop = debugInfo.scrollHeight;
             console.log(message);
+        }
+
+        function getSavedDataCount() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                return Array.isArray(saved) ? saved.length : 0;
+            } catch (error) {
+                return 0;
+            }
+        }
+
+        function updateDataActionButtons() {
+            const hasData = dataLog.length > 0;
+            saveButton.disabled = !hasData;
+            exportButton.disabled = !hasData;
+            clearDataButton.disabled = !hasData;
+            savedPoints.textContent = getSavedDataCount();
+        }
+
+        function isDeviceConnected() {
+            return Boolean(bluetoothDevice && bluetoothDevice.gatt && bluetoothDevice.gatt.connected);
+        }
+
+        function scheduleChartUpdate() {
+            if (pendingChartUpdate) {
+                return;
+            }
+
+            pendingChartUpdate = true;
+            requestAnimationFrame(() => {
+                pendingChartUpdate = false;
+                resistanceChart.update('none');
+            });
+        }
+
+        function saveDataToBrowser() {
+            if (dataLog.length === 0) {
+                showError('当前没有可保存的数据');
+                return;
+            }
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(dataLog));
+            savedPoints.textContent = dataLog.length;
+            logDebug(`已保存 ${dataLog.length} 个数据点到浏览器`);
+        }
+
+        function exportDataCsv() {
+            if (dataLog.length === 0) {
+                showError('当前没有可导出的数据');
+                return;
+            }
+
+            const header = ['序号', '标准采样时间(s)', '网页接收时间(s)', '本地时间', '主耳杯电阻(Ω)', '从耳杯电阻(Ω)', '差值(Ω)'];
+            const rows = dataLog.map((item, index) => [
+                index + 1,
+                item.nominalElapsedSeconds.toFixed(3),
+                item.receivedElapsedSeconds.toFixed(3),
+                item.localTime,
+                item.rightOhms.toFixed(2),
+                item.leftOhms.toFixed(2),
+                item.diffOhms.toFixed(2)
+            ]);
+            const csv = [header, ...rows]
+                .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
+                .join('\n');
+
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            link.href = url;
+            link.download = `ESP32_resistance_${timestamp}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            logDebug(`已导出 ${dataLog.length} 个数据点为 CSV`);
+        }
+
+        function clearLoggedData() {
+            if (!confirm('确定清空当前记录和浏览器中保存的数据吗？')) {
+                return;
+            }
+
+            dataLog = [];
+            localStorage.removeItem(STORAGE_KEY);
+            resetData();
+            savedPoints.textContent = '0';
+            updateDataActionButtons();
+            logDebug('数据记录已清空');
         }
         
         // 更新连接状态
@@ -506,6 +626,8 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
+                    normalized: true,
                     interaction: {
                         mode: 'index',
                         intersect: false
@@ -679,6 +801,9 @@
             resistanceRightSpan.textContent = '--';
             resistanceDiffSpan.textContent = '--';
             lastUpdate.textContent = '--';
+            receiveRate.textContent = '--';
+            startTime = null;
+            lastDataAt = null;
             logDebug('断开连接清理完成');
         }
 
@@ -688,11 +813,15 @@
             chartData.datasets[0].data = [];
             chartData.datasets[1].data = [];
             if (resistanceChart) {
-                resistanceChart.update();
+                resistanceChart.update('none');
             }
             dataPointCount = 0;
+            dataLog = [];
             dataPoints.textContent = '0';
-            startTime = null;
+            lastDataAt = null;
+            receiveRate.textContent = '--';
+            startTime = isDeviceConnected() ? Date.now() : null;
+            updateDataActionButtons();
             logDebug('数据已重置');
         }
         
@@ -732,16 +861,40 @@
                 const diff = Math.abs(valueRight - valueLeft);
                 resistanceDiffSpan.textContent = diff.toFixed(2);
                 
-                // 更新时间
-                const currentTime = startTime ? (Date.now() - startTime) / 1000 : 0;
+                const now = new Date();
+                const nowMs = now.getTime();
+                if (!startTime) {
+                    startTime = nowMs;
+                }
+
+                if (lastDataAt) {
+                    const intervalSeconds = (nowMs - lastDataAt) / 1000;
+                    if (intervalSeconds > 0) {
+                        receiveRate.textContent = `${(1 / intervalSeconds).toFixed(1)} Hz`;
+                    }
+                }
+                lastDataAt = nowMs;
+
+                // 更新时间：标准采样时间按 ESP32 目标输出周期计算，网页接收时间保留用于观察蓝牙抖动。
+                const sampleIndex = dataPointCount + 1;
+                const nominalTime = (sampleIndex - 1) * EXPECTED_SAMPLE_INTERVAL_SECONDS;
+                const receivedTime = (nowMs - startTime) / 1000;
+                dataLog.push({
+                    nominalElapsedSeconds: nominalTime,
+                    receivedElapsedSeconds: receivedTime,
+                    localTime: now.toLocaleString(),
+                    rightOhms: valueRight,
+                    leftOhms: valueLeft,
+                    diffOhms: diff
+                });
                 
                 // 添加到图表数据
-                chartData.labels.push(currentTime.toFixed(1));
+                chartData.labels.push(nominalTime.toFixed(1));
                 chartData.datasets[0].data.push(valueRight);  // 右耳杯数据 (AIN0)
                 chartData.datasets[1].data.push(valueLeft);   // 左耳杯数据 (AIN1)
                 
                 // 限制数据点数量
-                const maxDataPoints = 100;
+                const maxDataPoints = 600;
                 if (chartData.labels.length > maxDataPoints) {
                     chartData.labels.shift();
                     chartData.datasets[0].data.shift();
@@ -751,9 +904,10 @@
                 // 更新数据点计数
                 dataPointCount++;
                 dataPoints.textContent = dataPointCount;
+                updateDataActionButtons();
                 
                 // 更新图表
-                resistanceChart.update('quiet');
+                scheduleChartUpdate();
                 
                 logDebug(`数据更新 - 右耳杯(AIN0): ${valueRight.toFixed(2)}Ω, 左耳杯(AIN1): ${valueLeft.toFixed(2)}Ω`);
             } catch (error) {
@@ -772,6 +926,7 @@
         function initializeApp() {
             initChart();
             updateTimeDisplay();
+            updateDataActionButtons();
             
             // 检查设备兼容性
             const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
