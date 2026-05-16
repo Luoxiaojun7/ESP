@@ -237,7 +237,7 @@
             line-height: 1.6;
         }
         
-        #mobileTips, #iosTips, #androidEdgeTip, #errorMessage {
+        #mobileTips, #iosTips, #androidEdgeTip, #errorMessage, #csvExportPanel {
             margin: 15px 25px;
             padding: 15px;
             border-radius: 8px;
@@ -267,6 +267,39 @@
             background: #f8d7da;
             border: 1px solid #f5c6cb;
             color: #721c24;
+        }
+
+        #csvExportPanel {
+            background: #eef7ff;
+            border: 1px solid #b8dcff;
+            color: #17415f;
+        }
+
+        #csvExportPanel textarea {
+            width: 100%;
+            min-height: 180px;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #99ceff;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            resize: vertical;
+            background: white;
+            color: #2c3e50;
+        }
+
+        .panel-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .panel-actions button {
+            min-width: 120px;
+            padding: 9px 14px;
+            font-size: 14px;
         }
         
         .download-link {
@@ -375,6 +408,16 @@
         
         <div id="debugInfo"></div>
 
+        <div id="csvExportPanel">
+            <strong>CSV数据已生成。</strong>
+            <p>如果手机浏览器没有弹出下载或分享窗口，可以复制下面的内容，粘贴到备忘录、文件或表格软件中保存。</p>
+            <textarea id="csvTextOutput" readonly></textarea>
+            <div class="panel-actions">
+                <button type="button" onclick="copyCsvText()">复制CSV文本</button>
+                <button type="button" onclick="hideCsvPanel()">收起</button>
+            </div>
+        </div>
+
         <div class="data-container">
             <div class="data-panel">
                 <h3>主耳杯电阻 (AIN0)</h3>
@@ -453,6 +496,8 @@
         const androidEdgeTip = document.getElementById('androidEdgeTip');
         const errorMessage = document.getElementById('errorMessage');
         const debugInfo = document.getElementById('debugInfo');
+        const csvExportPanel = document.getElementById('csvExportPanel');
+        const csvTextOutput = document.getElementById('csvTextOutput');
         
         // 图表相关变量
         let resistanceChart;
@@ -542,12 +587,7 @@
             logDebug(`已保存 ${dataLog.length} 个数据点到浏览器`);
         }
 
-        function exportDataCsv() {
-            if (dataLog.length === 0) {
-                showError('当前没有可导出的数据');
-                return;
-            }
-
+        function buildCsvText() {
             const header = ['序号', '标准采样时间(s)', '网页接收时间(s)', '本地时间', '主耳杯电阻(Ω)', '从耳杯电阻(Ω)', '差值(Ω)'];
             const rows = dataLog.map((item, index) => [
                 index + 1,
@@ -558,21 +598,84 @@
                 item.leftOhms.toFixed(2),
                 item.diffOhms.toFixed(2)
             ]);
-            const csv = [header, ...rows]
-                .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
-                .join('\n');
 
+            return [header, ...rows]
+                .map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+                .join('\n');
+        }
+
+        function showCsvPanel(csv) {
+            csvTextOutput.value = csv;
+            csvExportPanel.style.display = 'block';
+            csvTextOutput.focus();
+            csvTextOutput.select();
+        }
+
+        function hideCsvPanel() {
+            csvExportPanel.style.display = 'none';
+        }
+
+        async function copyCsvText() {
+            if (!csvTextOutput.value) {
+                return;
+            }
+
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(csvTextOutput.value);
+                } else {
+                    csvTextOutput.focus();
+                    csvTextOutput.select();
+                    document.execCommand('copy');
+                }
+                logDebug('CSV文本已复制');
+            } catch (error) {
+                showError('复制失败，请长按文本框手动复制');
+            }
+        }
+
+        async function exportDataCsv() {
+            if (dataLog.length === 0) {
+                showError('当前没有可导出的数据');
+                return;
+            }
+
+            const csv = buildCsvText();
             const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            link.href = url;
-            link.download = `ESP32_resistance_${timestamp}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            logDebug(`已导出 ${dataLog.length} 个数据点为 CSV`);
+            const filename = `ESP32_resistance_${timestamp}.csv`;
+            const file = new File([blob], filename, { type: 'text/csv' });
+
+            showCsvPanel(csv);
+
+            try {
+                if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'ESP32电阻数据',
+                        text: 'ESP32双通道电阻CSV数据'
+                    });
+                    logDebug(`已通过系统分享导出 ${dataLog.length} 个数据点`);
+                    return;
+                }
+            } catch (error) {
+                logDebug(`系统分享未完成: ${error.message}`);
+            }
+
+            try {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                link.target = '_blank';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                logDebug(`已尝试下载 ${dataLog.length} 个数据点为 CSV`);
+            } catch (error) {
+                showError('当前浏览器不支持直接下载，请复制下方CSV文本保存');
+            }
         }
 
         function clearLoggedData() {
